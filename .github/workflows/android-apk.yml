@@ -1,0 +1,84 @@
+name: android-apk
+
+# Best-effort Android APK build of the current (port-14 era) OpenTTD port
+# through the pelya/commandergenius SDL wrapper. Produces an .apk artifact
+# when the build succeeds. The v16 rebased APK is tracked separately;
+# this job proves the pipeline and gives testers something to install now.
+
+on:
+  push:
+    paths:
+      - "android-wrapper/**"
+      - ".github/workflows/android-apk.yml"
+  pull_request:
+    paths:
+      - "android-wrapper/**"
+      - ".github/workflows/android-apk.yml"
+  workflow_dispatch:
+
+jobs:
+  build-apk-port14:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Check out orchestration repo (reference only)
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 11
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "11"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK + host deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ant autoconf automake libtool ninja-build cmake curl unzip zip xz-utils jarwrapper fastjar || true
+          sdkmanager --install "ndk;25.2.9519653" "platforms;android-33" "build-tools;33.0.2"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/25.2.9519653" >> "$GITHUB_ENV"
+          echo "$ANDROID_SDK_ROOT/ndk/25.2.9519653" >> "$GITHUB_PATH"
+
+      - name: Clone commandergenius (SDL wrapper, sdl_android)
+        run: |
+          git clone --depth 1 --branch sdl_android https://github.com/pelya/commandergenius.git cg
+          cd cg
+          git submodule update --init project/jni/application/openttd/src project/jni/sdl2 || true
+          git submodule status | head -30
+          ls project/jni/application/openttd/
+
+      - name: Select openttd app + apply settings
+        run: |
+          cd cg
+          rm -f project/jni/application/src
+          ln -s openttd project/jni/application/src
+          ./changeAppSettings.sh -a || true
+          grep -E '^(AppName|AppFullName|AppVersionName|LibSdlVersion)=' AndroidAppSettings.cfg || true
+
+      - name: Build debug APK (openttd)
+        run: |
+          cd cg
+          export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/25.2.9519653"
+          export PATH="$ANDROID_NDK_HOME:$PATH"
+          which ndk-build || true
+          ./build.sh debug openttd 2>&1 | tail -100
+
+      - name: Locate APKs
+        id: locate
+        if: always()
+        run: |
+          cd cg
+          find . -maxdepth 4 -name '*.apk' 2>/dev/null | head -20
+          find project -name '*.apk' 2>/dev/null | head -20
+
+      - name: Upload APK artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openttd-android-apk
+          path: |
+            cg/project/bin/*.apk
+            cg/project/build/outputs/**/*.apk
+          if-no-files-found: warn
