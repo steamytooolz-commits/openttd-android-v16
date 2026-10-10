@@ -66,7 +66,12 @@ jobs:
       - name: CI speed-up - single ABI (arm64-v8a)
         run: |
           cd cg
-          sed -i "s/^MultiABI=.*/MultiABI='arm64-v8a'/" AndroidAppSettings.cfg project/jni/application/openttd/AndroidAppSettings.cfg
+          # Root AndroidAppSettings.cfg is a symlink to
+          # project/jni/application/src/AndroidAppSettings.cfg, so the src
+          # symlink must exist before editing.
+          rm -f project/jni/application/src
+          ln -s openttd project/jni/application/src
+          sed -i "s/^MultiABI=.*/MultiABI='arm64-v8a'/" project/jni/application/openttd/AndroidAppSettings.cfg
           grep -H '^MultiABI=' AndroidAppSettings.cfg project/jni/application/openttd/AndroidAppSettings.cfg
 
       - name: Build ICU + OpenSSL prebuilts (arm64-v8a only)
