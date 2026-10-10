@@ -1,0 +1,72 @@
+name: android-v16
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  port-status:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out orchestration repo
+        uses: actions/checkout@v4
+      - name: Merge/conflict report (port 14 vs upstream 16.0-beta4)
+        run: |
+          bash scripts/merge-report.sh 2>&1 | tee merge-report.txt
+          {
+            echo "## Port status: 14 vs 16.0-beta4";
+            echo '```';
+            cat merge-report.txt;
+            echo '```';
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: merge-report
+          path: merge-report.txt
+
+  host-configure:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install host deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libsdl2-dev libfontconfig-dev libfreetype-dev libicu-dev liblzma-dev liblzo2-dev libpng-dev zlib1g-dev libcurl4-openssl-dev libfluidsynth-dev
+      - name: Check out upstream 16.0-beta4
+        uses: actions/checkout@v4
+        with:
+          repository: OpenTTD/OpenTTD
+          ref: 16.0-beta4
+          path: upstream
+      - name: CMake configure (tools only, fast sanity)
+        run: cmake -S upstream -B build-tools -DOPTION_TOOLS_ONLY=ON
+      - name: CMake configure (full game, no build)
+        run: cmake -S upstream -B build-full -DOPTION_DEDICATED=OFF -DCMAKE_BUILD_TYPE=RelWithDebInfo
+
+  wrapper-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out orchestration repo
+        uses: actions/checkout@v4
+      - name: Validate v16 wrapper configs
+        run: |
+          grep -q '^LibSdlVersion=2$' android-wrapper/AndroidAppSettings.cfg
+          grep -q '16\.0-beta4' android-wrapper/AndroidAppSettings.cfg
+          grep -q 'AppVersionCode=1600001' android-wrapper/AndroidAppSettings.cfg
+          grep -q 'VER=16\.0-beta4-0' android-wrapper/pack-data.sh
+          grep -q 'sdl2|SDL2' android-wrapper/AndroidBuild.sh
+          echo "wrapper configs OK"
+          bash -n android-wrapper/AndroidBuild.sh
+          bash -n android-wrapper/AndroidPreBuild.sh
+          bash -n android-wrapper/pack-data.sh
+          bash -n android-wrapper/download-data.sh
+          bash -n scripts/merge-report.sh
+          echo "shell syntax OK"
+      - name: Wrapper summary
+        run: |
+          {
+            echo "## Wrapper check";
+            echo "- LibSdlVersion=2, version 16.0-beta4.rev1 (1600001), data VER 16.0-beta4-0";
+            echo "- AndroidBuild.sh carries SDL2 case + ICU builtin note";
+          } >> "$GITHUB_STEP_SUMMARY"
