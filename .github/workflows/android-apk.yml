@@ -58,8 +58,24 @@ jobs:
           git clone --depth 1 --branch sdl_android https://github.com/pelya/commandergenius.git cg
           cd cg
           git submodule update --init project/jni/application/openttd/src project/jni/sdl2 || true
+          git submodule update --init --recursive project/jni/iconv/src || true
           git submodule status | head -30
           ls project/jni/application/openttd/
+          test -f project/jni/iconv/src/build.sh && echo "iconv sources OK" || echo "iconv sources MISSING"
+
+      - name: CI speed-up - single ABI (arm64-v8a)
+        run: |
+          cd cg
+          sed -i "s/^MultiABI=.*/MultiABI='arm64-v8a'/" AndroidAppSettings.cfg project/jni/application/openttd/AndroidAppSettings.cfg
+          grep -H '^MultiABI=' AndroidAppSettings.cfg project/jni/application/openttd/AndroidAppSettings.cfg
+
+      - name: Build ICU + OpenSSL prebuilts (arm64-v8a only)
+        run: |
+          cd cg/project/jni
+          export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/25.2.9519653"
+          export PATH="$ANDROID_NDK_HOME:$PATH"
+          make -f Makefile.prebuilt ARCH_LIST=arm64-v8a icu openssl 2>&1 | tail -30
+          ls icuuc/lib/arm64-v8a/ | head -20
 
       - name: Select openttd app + apply settings
         run: |
@@ -75,7 +91,8 @@ jobs:
           export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/25.2.9519653"
           export PATH="$ANDROID_NDK_HOME:$PATH"
           which ndk-build || true
-          ./build.sh debug openttd 2>&1 | tail -100
+          set -o pipefail
+          ./build.sh debug openttd 2>&1 | tee ../openttd-build.log | tail -60
 
       - name: Locate APKs
         id: locate
@@ -94,4 +111,12 @@ jobs:
           path: |
             cg/project/bin/*.apk
             cg/project/build/outputs/**/*.apk
+          if-no-files-found: warn
+
+      - name: Upload build log (always, for diagnostics)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openttd-build-log
+          path: openttd-build.log
           if-no-files-found: warn
